@@ -74,7 +74,7 @@ internal sealed class JsListFormat : ObjectInstance
         }
 
         // For 3+ items: "A, B, and C" or "A, B, or C"
-        var result = new ValueStringBuilder();
+        using var result = new ValueStringBuilder();
         for (var i = 0; i < list.Length; i++)
         {
             if (i > 0)

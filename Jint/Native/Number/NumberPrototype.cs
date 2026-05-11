@@ -136,7 +136,7 @@ internal sealed partial class NumberPrototype : NumberInstance
     {
         if (x == 0)
         {
-            var sb = new ValueStringBuilder(stackalloc char[128]);
+            using var sb = new ValueStringBuilder(stackalloc char[128]);
             if (negative)
             {
                 sb.Append('-');
@@ -155,7 +155,7 @@ internal sealed partial class NumberPrototype : NumberInstance
             out _,
             out var decimalPoint);
 
-        var result2 = new ValueStringBuilder(stackalloc char[fractionDigits + 50]);
+        using var result2 = new ValueStringBuilder(stackalloc char[fractionDigits + 50]);
         if (negative)
         {
             result2.Append('-');
@@ -330,7 +330,7 @@ internal sealed partial class NumberPrototype : NumberInstance
             return CreateExponentialRepresentation(ref dtoaBuilder, exponent, negative, p);
         }
 
-        var sb = new ValueStringBuilder(stackalloc char[128]);
+        using var sb = new ValueStringBuilder(stackalloc char[128]);
 
         // Use fixed notation.
         if (negative)
@@ -381,7 +381,7 @@ internal sealed partial class NumberPrototype : NumberInstance
             exponent = -exponent;
         }
 
-        var sb = new ValueStringBuilder(stackalloc char[128]);
+        using var sb = new ValueStringBuilder(stackalloc char[128]);
         if (negative)
         {
             sb.Append('-');
@@ -479,7 +479,7 @@ internal sealed partial class NumberPrototype : NumberInstance
     private static string ToBaseCore(long n, int radix)
     {
         const string Digits = "0123456789abcdefghijklmnopqrstuvwxyz";
-        var sb = new ValueStringBuilder(stackalloc char[64]);
+        using var sb = new ValueStringBuilder(stackalloc char[64]);
         while (n > 0)
         {
             var digit = (int) (n % radix);
@@ -501,7 +501,7 @@ internal sealed partial class NumberPrototype : NumberInstance
             return "0";
         }
 
-        var result = new ValueStringBuilder(stackalloc char[64]);
+        using var result = new ValueStringBuilder(stackalloc char[64]);
         while (n > 0 && result.Length < 50) // arbitrary limit
         {
             var c = n * radix;
@@ -542,7 +542,7 @@ internal sealed partial class NumberPrototype : NumberInstance
             out var decimal_point);
 
 
-        var stringBuilder = new ValueStringBuilder(stackalloc char[64]);
+        using var stringBuilder = new ValueStringBuilder(stackalloc char[64]);
         if (negative)
         {
             stringBuilder.Append('-');

@@ -164,44 +164,51 @@ public sealed partial class RegExpConstructor : Constructor
         }
 
         var sb = new ValueStringBuilder(stackalloc char[64]);
-        var isFirst = true;
-
-        // Iterate by code points (handling surrogate pairs)
-        for (var i = 0; i < str.Length; i++)
+        try
         {
-            var c = str[i];
-            int codePoint;
+            var isFirst = true;
 
-            // Handle surrogate pairs
-            if (char.IsHighSurrogate(c) && i + 1 < str.Length && char.IsLowSurrogate(str[i + 1]))
+            // Iterate by code points (handling surrogate pairs)
+            for (var i = 0; i < str.Length; i++)
             {
-                codePoint = char.ConvertToUtf32(c, str[i + 1]);
-                i++; // Skip the low surrogate
-            }
-            else
-            {
-                codePoint = c;
+                var c = str[i];
+                int codePoint;
+
+                // Handle surrogate pairs
+                if (char.IsHighSurrogate(c) && i + 1 < str.Length && char.IsLowSurrogate(str[i + 1]))
+                {
+                    codePoint = char.ConvertToUtf32(c, str[i + 1]);
+                    i++; // Skip the low surrogate
+                }
+                else
+                {
+                    codePoint = c;
+                }
+
+                // a. If escaped is the empty String, and c is matched by DecimalDigit or AsciiLetter, then
+                if (isFirst && IsDecimalDigitOrAsciiLetter(codePoint))
+                {
+                    // Escape as \xHH (lowercase hex)
+                    sb.Append('\\');
+                    sb.Append('x');
+                    sb.Append(ToHexDigit((codePoint >> 4) & 0xF));
+                    sb.Append(ToHexDigit(codePoint & 0xF));
+                }
+                else
+                {
+                    // b. Set escaped to the string-concatenation of escaped and EncodeForRegExpEscape(c).
+                    EncodeForRegExpEscape(ref sb, codePoint);
+                }
+
+                isFirst = false;
             }
 
-            // a. If escaped is the empty String, and c is matched by DecimalDigit or AsciiLetter, then
-            if (isFirst && IsDecimalDigitOrAsciiLetter(codePoint))
-            {
-                // Escape as \xHH (lowercase hex)
-                sb.Append('\\');
-                sb.Append('x');
-                sb.Append(ToHexDigit((codePoint >> 4) & 0xF));
-                sb.Append(ToHexDigit(codePoint & 0xF));
-            }
-            else
-            {
-                // b. Set escaped to the string-concatenation of escaped and EncodeForRegExpEscape(c).
-                EncodeForRegExpEscape(ref sb, codePoint);
-            }
-
-            isFirst = false;
+            return new JsString(sb.ToString());
         }
-
-        return new JsString(sb.ToString());
+        finally
+        {
+            sb.Dispose();
+        }
     }
 
     /// <summary>

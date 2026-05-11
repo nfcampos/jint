@@ -470,7 +470,7 @@ internal sealed partial class NumberFormatConstructor : Constructor
 
         // Find and remove the nu key-value pair
         var extensionStart = uIndex + 3;
-        var result = new ValueStringBuilder();
+        using var result = new ValueStringBuilder();
         result.Append(locale.AsSpan(0, uIndex));
         var i = extensionStart;
         var hasOtherExtensions = false;

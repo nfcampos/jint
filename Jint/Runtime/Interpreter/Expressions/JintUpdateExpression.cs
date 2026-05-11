@@ -51,59 +51,65 @@ internal sealed class JintUpdateExpression : JintExpression
             Throw.ReferenceError(engine.Realm, "Invalid left-hand side in assignment");
         }
 
-        reference.AssertValid(engine.Realm);
-
-        var value = engine.GetValue(reference, false);
-        var isInteger = value._type == InternalTypes.Integer;
-
-        JsValue? newValue = null;
-
-        var operatorOverloaded = false;
-        if (context.OperatorOverloadingAllowed)
+        try
         {
-            if (JintUnaryExpression.TryOperatorOverloading(context, _argument.GetValue(context), _change > 0 ? "op_Increment" : "op_Decrement", out var result))
-            {
-                operatorOverloaded = true;
-                newValue = result;
-            }
-        }
+            reference.AssertValid(engine.Realm);
 
-        if (!operatorOverloaded)
-        {
-            if (isInteger)
+            var value = engine.GetValue(reference, false);
+            var isInteger = value._type == InternalTypes.Integer;
+
+            JsValue? newValue = null;
+
+            var operatorOverloaded = false;
+            if (context.OperatorOverloadingAllowed)
             {
-                newValue = JsNumber.Create(value.AsInteger() + _change);
+                if (JintUnaryExpression.TryOperatorOverloading(context, _argument.GetValue(context), _change > 0 ? "op_Increment" : "op_Decrement", out var result))
+                {
+                    operatorOverloaded = true;
+                    newValue = result;
+                }
             }
-            else if (!value.IsBigInt())
+
+            if (!operatorOverloaded)
             {
-                newValue = JsNumber.Create(TypeConverter.ToNumber(value) + _change);
+                if (isInteger)
+                {
+                    newValue = JsNumber.Create(value.AsInteger() + _change);
+                }
+                else if (!value.IsBigInt())
+                {
+                    newValue = JsNumber.Create(TypeConverter.ToNumber(value) + _change);
+                }
+                else
+                {
+                    newValue = JsBigInt.Create(TypeConverter.ToBigInt(value) + _change);
+                }
+            }
+
+            engine.PutValue(reference, newValue!);
+
+            if (_prefix)
+            {
+                return newValue!;
             }
             else
             {
-                newValue = JsBigInt.Create(TypeConverter.ToBigInt(value) + _change);
+                if (isInteger || operatorOverloaded)
+                {
+                    return value;
+                }
+
+                if (!value.IsBigInt())
+                {
+                    return JsNumber.Create(TypeConverter.ToNumber(value));
+                }
+
+                return JsBigInt.Create(value);
             }
         }
-
-        engine.PutValue(reference, newValue!);
-        engine._referencePool.Return(reference);
-
-        if (_prefix)
+        finally
         {
-            return newValue!;
-        }
-        else
-        {
-            if (isInteger || operatorOverloaded)
-            {
-                return value;
-            }
-
-            if (!value.IsBigInt())
-            {
-                return JsNumber.Create(TypeConverter.ToNumber(value));
-            }
-
-            return JsBigInt.Create(value);
+            engine._referencePool.Return(reference);
         }
     }
 

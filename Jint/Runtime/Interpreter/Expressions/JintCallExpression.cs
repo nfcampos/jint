@@ -40,6 +40,10 @@ internal sealed class JintCallExpression : JintExpression
         // Check for generator suspension after evaluating callee
         if (context.IsSuspended())
         {
+            if (reference is Reference suspendedReference)
+            {
+                context.Engine._referencePool.Return(suspendedReference);
+            }
             return reference as JsValue ?? JsValue.Undefined;
         }
 
@@ -49,123 +53,128 @@ internal sealed class JintCallExpression : JintExpression
         }
 
         var engine = context.Engine;
-        var func = engine.GetValue(reference, false);
-
-        if (func.IsNullOrUndefined() && _expression.IsOptional())
-        {
-            return JsValue.Undefined;
-        }
-
         var referenceRecord = reference as Reference;
-        if (ReferenceEquals(func, engine.Realm.Intrinsics.Eval)
-            && referenceRecord != null
-            && !referenceRecord.IsPropertyReference
-            && CommonProperties.Eval.Equals(referenceRecord.ReferencedName))
+        try
         {
-            return HandleEval(context, func, engine, referenceRecord);
-        }
+            var func = engine.GetValue(reference, false);
 
-        var thisCall = (CallExpression) _expression;
-        var tailCall = IsInTailPosition(thisCall);
-
-        // https://tc39.es/ecma262/#sec-evaluatecall
-
-        JsValue thisObject;
-        if (referenceRecord is not null)
-        {
-            if (referenceRecord.IsPropertyReference)
+            if (func.IsNullOrUndefined() && _expression.IsOptional())
             {
-                thisObject = referenceRecord.ThisValue;
+                return JsValue.Undefined;
             }
-            else
-            {
-                var baseValue = referenceRecord.Base;
 
-                // deviation from the spec to support null-propagation helper
-                if (baseValue.IsNullOrUndefined()
-                    && engine._referenceResolver.TryUnresolvableReference(engine, referenceRecord, out var value))
+            if (ReferenceEquals(func, engine.Realm.Intrinsics.Eval)
+                && referenceRecord != null
+                && !referenceRecord.IsPropertyReference
+                && CommonProperties.Eval.Equals(referenceRecord.ReferencedName))
+            {
+                return HandleEval(context, func, engine, referenceRecord);
+            }
+
+            var thisCall = (CallExpression) _expression;
+            var tailCall = IsInTailPosition(thisCall);
+
+            // https://tc39.es/ecma262/#sec-evaluatecall
+
+            JsValue thisObject;
+            if (referenceRecord is not null)
+            {
+                if (referenceRecord.IsPropertyReference)
                 {
-                    thisObject = value;
+                    thisObject = referenceRecord.ThisValue;
                 }
                 else
                 {
-                    var refEnv = (Environment) baseValue;
-                    thisObject = refEnv.WithBaseObject();
-                }
-            }
-        }
-        else
-        {
-            thisObject = JsValue.Undefined;
-        }
+                    var baseValue = referenceRecord.Base;
 
-        var arguments = this._arguments.ArgumentListEvaluation(context, out var rented);
-
-        // Check for generator suspension after argument evaluation
-        if (context.IsSuspended())
-        {
-            if (rented && arguments is not null)
-            {
-                engine._jsValueArrayPool.ReturnArray(arguments);
-            }
-            return func; // Return any value, caller will check Suspended
-        }
-
-        try
-        {
-            if (!func.IsObject() && !engine._referenceResolver.TryGetCallable(engine, reference, out func))
-            {
-                ThrowMemberIsNotFunction(referenceRecord, reference, engine);
-            }
-
-            var callable = func as ICallable;
-            if (callable is null)
-            {
-                ThrowReferenceNotFunction(referenceRecord, reference, engine);
-            }
-
-            if (tailCall)
-            {
-                // TODO tail call
-                // PrepareForTailCall();
-            }
-
-            // ensure logic is in sync between Call, Construct and JintCallExpression!
-
-            if (callable is Function functionInstance)
-            {
-                var callStack = engine.CallStack;
-                var recursionDepth = callStack.Push(functionInstance, _calleeExpression, engine.ExecutionContext);
-
-                if (recursionDepth > engine.Options.Constraints.MaxRecursionDepth)
-                {
-                    // automatically pops the current element as it was never reached
-                    Throw.RecursionDepthOverflowException(callStack);
-                }
-
-                try
-                {
-                    return functionInstance.Call(thisObject, arguments);
-                }
-                finally
-                {
-                    // if call stack was reset due to recursive call to engine or similar, we might not have it anymore
-                    if (callStack.Count > 0)
+                    // deviation from the spec to support null-propagation helper
+                    if (baseValue.IsNullOrUndefined()
+                        && engine._referenceResolver.TryUnresolvableReference(engine, referenceRecord, out var value))
                     {
-                        callStack.Pop();
+                        thisObject = value;
+                    }
+                    else
+                    {
+                        var refEnv = (Environment) baseValue;
+                        thisObject = refEnv.WithBaseObject();
                     }
                 }
             }
+            else
+            {
+                thisObject = JsValue.Undefined;
+            }
 
-            return callable.Call(thisObject, arguments);
+            var arguments = this._arguments.ArgumentListEvaluation(context, out var rented);
+
+            // Check for generator suspension after argument evaluation
+            if (context.IsSuspended())
+            {
+                if (rented && arguments is not null)
+                {
+                    engine._jsValueArrayPool.ReturnArray(arguments);
+                }
+                return func; // Return any value, caller will check Suspended
+            }
+
+            try
+            {
+                if (!func.IsObject() && !engine._referenceResolver.TryGetCallable(engine, reference, out func))
+                {
+                    ThrowMemberIsNotFunction(referenceRecord, reference, engine);
+                }
+
+                var callable = func as ICallable;
+                if (callable is null)
+                {
+                    ThrowReferenceNotFunction(referenceRecord, reference, engine);
+                }
+
+                if (tailCall)
+                {
+                    // TODO tail call
+                    // PrepareForTailCall();
+                }
+
+                // ensure logic is in sync between Call, Construct and JintCallExpression!
+
+                if (callable is Function functionInstance)
+                {
+                    var callStack = engine.CallStack;
+                    var recursionDepth = callStack.Push(functionInstance, _calleeExpression, engine.ExecutionContext);
+
+                    if (recursionDepth > engine.Options.Constraints.MaxRecursionDepth)
+                    {
+                        // automatically pops the current element as it was never reached
+                        Throw.RecursionDepthOverflowException(callStack);
+                    }
+
+                    try
+                    {
+                        return functionInstance.Call(thisObject, arguments);
+                    }
+                    finally
+                    {
+                        // if call stack was reset due to recursive call to engine or similar, we might not have it anymore
+                        if (callStack.Count > 0)
+                        {
+                            callStack.Pop();
+                        }
+                    }
+                }
+
+                return callable.Call(thisObject, arguments);
+            }
+            finally
+            {
+                if (rented)
+                {
+                    engine._jsValueArrayPool.ReturnArray(arguments);
+                }
+            }
         }
         finally
         {
-            if (rented)
-            {
-                engine._jsValueArrayPool.ReturnArray(arguments);
-            }
-
             engine._referencePool.Return(referenceRecord);
         }
     }
@@ -198,7 +207,6 @@ internal sealed class JintCallExpression : JintExpression
             {
                 engine._jsValueArrayPool.ReturnArray(argList);
             }
-            engine._referencePool.Return(referenceRecord);
             return JsValue.Undefined;
         }
 
@@ -217,7 +225,6 @@ internal sealed class JintCallExpression : JintExpression
             {
                 engine._jsValueArrayPool.ReturnArray(argList);
             }
-            engine._referencePool.Return(referenceRecord);
         }
     }
 

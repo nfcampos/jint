@@ -1866,7 +1866,7 @@ internal sealed partial class StringPrototype : StringInstance
             return new string(s[0], (int) n);
         }
 
-        var sb = new ValueStringBuilder((int) (n * s.Length));
+        using var sb = new ValueStringBuilder((int) (n * s.Length));
         for (var i = 0; i < n; ++i)
         {
             sb.Append(s);
@@ -1893,7 +1893,7 @@ internal sealed partial class StringPrototype : StringInstance
         var strLen = s.Length;
         var k = 0;
 
-        var result = new ValueStringBuilder();
+        using var result = new ValueStringBuilder();
         while (k < strLen)
         {
             var cp = CodePointAt(s, k);

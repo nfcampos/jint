@@ -3678,7 +3678,7 @@ internal static class TemporalHelpers
     /// </summary>
     public static string FormatIsoDate(IsoDate date, string? calendarId = null)
     {
-        var sb = new ValueStringBuilder();
+        using var sb = new ValueStringBuilder();
 
         if (date.Year < 0 || date.Year > 9999)
         {
@@ -3710,7 +3710,7 @@ internal static class TemporalHelpers
     /// </summary>
     public static string FormatIsoTime(IsoTime time, string? precision = null)
     {
-        var sb = new ValueStringBuilder();
+        using var sb = new ValueStringBuilder();
         sb.Append(time.Hour.ToString("D2", CultureInfo.InvariantCulture));
         sb.Append(':');
         sb.Append(time.Minute.ToString("D2", CultureInfo.InvariantCulture));
@@ -3768,7 +3768,7 @@ internal static class TemporalHelpers
     /// <param name="precision">Number of fractional digits: -1 for "auto", 0-9 for fixed digits.</param>
     public static string FormatDuration(DurationRecord duration, int precision = -1)
     {
-        var sb = new ValueStringBuilder();
+        using var sb = new ValueStringBuilder();
 
         if (duration.Sign() < 0)
         {

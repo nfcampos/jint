@@ -229,37 +229,48 @@ internal sealed class JintMemberExpression : JintExpression
             return (JsValue) result;
         }
 
-        // Fast path for string character access: str[intIndex]
-        if (_memberExpression.Computed
-            && reference.Base is JsString str
-            && reference.ReferencedName is JsNumber num
-            && num.IsInteger())
+        var returnReference = true;
+        try
         {
-            engine._referencePool.Return(reference);
-            var index = num.AsInteger();
-            if ((uint) index < (uint) str.Length)
+            // Fast path for string character access: str[intIndex]
+            if (_memberExpression.Computed
+                && reference.Base is JsString str
+                && reference.ReferencedName is JsNumber num
+                && num.IsInteger())
             {
-                return JsString.Create(str[index]);
+                var index = num.AsInteger();
+                if ((uint) index < (uint) str.Length)
+                {
+                    return JsString.Create(str[index]);
+                }
+
+                return JsValue.Undefined;
             }
 
-            return JsValue.Undefined;
-        }
+            // Check if base is null/undefined before calling Engine.GetValue
+            // This ensures the error has the correct location (the property access)
+            // Per ECMAScript spec, ToObject(base) must happen before ToPropertyKey(property),
+            // so we must NOT try to convert property to string for the error message if it's an object.
+            if (reference.Base.IsNullOrUndefined())
+            {
+                var property = reference.ReferencedName;
+                // Only use property for error message if it's already a primitive (won't trigger ToPropertyKey)
+                var referenceName = property.IsPrimitive()
+                    ? TypeConverter.ToString(property)
+                    : null;
 
-        // Check if base is null/undefined before calling Engine.GetValue
-        // This ensures the error has the correct location (the property access)
-        // Per ECMAScript spec, ToObject(base) must happen before ToPropertyKey(property),
-        // so we must NOT try to convert property to string for the error message if it's an object.
-        if (reference.Base.IsNullOrUndefined())
+                TypeConverter.CheckObjectCoercible(engine, reference.Base, _memberExpression.Property, referenceName);
+            }
+
+            returnReference = false;
+            return engine.GetValue(reference, returnReferenceToPool: true);
+        }
+        finally
         {
-            var property = reference.ReferencedName;
-            // Only use property for error message if it's already a primitive (won't trigger ToPropertyKey)
-            var referenceName = property.IsPrimitive()
-                ? TypeConverter.ToString(property)
-                : null;
-
-            TypeConverter.CheckObjectCoercible(engine, reference.Base, _memberExpression.Property, referenceName);
+            if (returnReference)
+            {
+                engine._referencePool.Return(reference);
+            }
         }
-
-        return engine.GetValue(reference, returnReferenceToPool: true);
     }
 }

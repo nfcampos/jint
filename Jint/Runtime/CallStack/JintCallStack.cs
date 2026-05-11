@@ -154,33 +154,36 @@ internal sealed class JintCallStack
 
         var customCallStackBuilder = engine.Options.Interop.BuildCallStackHandler;
         var builder = new ValueStringBuilder();
-
-        // stack is one frame behind function-wise when we start to process it from expression level
-        var index = _stack._size - 1 - excludeTop;
-        var element = index >= 0 ? _stack[index] : (CallStackElement?) null;
-        var shortDescription = element?.ToString() ?? "";
-
-        AppendLocation(ref builder, shortDescription, location, element, customCallStackBuilder);
-
-        location = element?.Location ?? default;
-        index--;
-
-        while (index >= -1)
+        try
         {
-            element = index >= 0 ? _stack[index] : null;
-            shortDescription = element?.ToString() ?? "";
+
+            // stack is one frame behind function-wise when we start to process it from expression level
+            var index = _stack._size - 1 - excludeTop;
+            var element = index >= 0 ? _stack[index] : (CallStackElement?) null;
+            var shortDescription = element?.ToString() ?? "";
 
             AppendLocation(ref builder, shortDescription, location, element, customCallStackBuilder);
 
             location = element?.Location ?? default;
             index--;
+
+            while (index >= -1)
+            {
+                element = index >= 0 ? _stack[index] : null;
+                shortDescription = element?.ToString() ?? "";
+
+                AppendLocation(ref builder, shortDescription, location, element, customCallStackBuilder);
+
+                location = element?.Location ?? default;
+                index--;
+            }
+
+            return builder.AsSpan().TrimEnd().ToString();
         }
-
-        var result = builder.AsSpan().TrimEnd().ToString();
-
-        builder.Dispose();
-
-        return result;
+        finally
+        {
+            builder.Dispose();
+        }
     }
 
     private static bool TryInvokeCustomCallStackHandler(

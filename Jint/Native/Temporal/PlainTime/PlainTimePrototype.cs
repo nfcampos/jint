@@ -540,7 +540,7 @@ internal sealed partial class PlainTimePrototype : Prototype
     /// </summary>
     private static string FormatTime(IsoTime time, int precision)
     {
-        var sb = new ValueStringBuilder();
+        using var sb = new ValueStringBuilder();
         sb.Append(time.Hour.ToString("D2", CultureInfo.InvariantCulture));
         sb.Append(':');
         sb.Append(time.Minute.ToString("D2", CultureInfo.InvariantCulture));

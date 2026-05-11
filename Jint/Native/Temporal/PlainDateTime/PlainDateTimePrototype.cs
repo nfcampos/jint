@@ -1062,7 +1062,7 @@ internal sealed partial class PlainDateTimePrototype : Prototype
 
     private static string FormatDateTime(IsoDateTime dateTime, string calendar, string calendarName = "auto", int fractionalSecondDigits = -1)
     {
-        var sb = new ValueStringBuilder();
+        using var sb = new ValueStringBuilder();
 
         // Format date
         if (dateTime.Year < 0 || dateTime.Year > 9999)

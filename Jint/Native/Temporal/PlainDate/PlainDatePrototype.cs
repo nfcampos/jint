@@ -857,7 +857,7 @@ internal sealed partial class PlainDatePrototype : Prototype
 
     private static string FormatDate(IsoDate date, string calendar, string calendarName = "auto")
     {
-        var sb = new ValueStringBuilder();
+        using var sb = new ValueStringBuilder();
 
         if (date.Year < 0 || date.Year > 9999)
         {

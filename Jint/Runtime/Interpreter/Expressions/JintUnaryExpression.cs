@@ -221,55 +221,58 @@ internal sealed class JintUnaryExpression : JintExpression
                     return JsBoolean.True;
                 }
 
-                if (r.IsUnresolvableReference)
+                try
                 {
-                    if (r.Strict)
-                    {
-                        Throw.SyntaxError(engine.Realm, "Delete of an unqualified identifier in strict mode.");
-                    }
-
-                    engine._referencePool.Return(r);
-                    return JsBoolean.True;
-                }
-
-                if (r.IsPropertyReference)
-                {
-                    if (r.IsSuperReference)
-                    {
-                        Throw.ReferenceError(engine.Realm, "Unsupported reference to 'super'");
-                    }
-
-                    var o = TypeConverter.ToObject(engine.Realm, r.Base);
-
-                    r.EvaluateAndCachePropertyKey();
-                    var deleteStatus = o.Delete(r.ReferencedName);
-
-                    if (!deleteStatus)
+                    if (r.IsUnresolvableReference)
                     {
                         if (r.Strict)
                         {
-                            Throw.TypeError(engine.Realm, $"Cannot delete property '{r.ReferencedName}' of {o}");
+                            Throw.SyntaxError(engine.Realm, "Delete of an unqualified identifier in strict mode.");
                         }
 
-                        if (StrictModeScope.IsStrictModeCode && !r.Base.AsObject().GetOwnProperty(r.ReferencedName).Configurable)
-                        {
-                            Throw.TypeError(engine.Realm, $"Cannot delete property '{r.ReferencedName}' of {o}");
-                        }
+                        return JsBoolean.True;
                     }
 
-                    engine._referencePool.Return(r);
-                    return deleteStatus ? JsBoolean.True : JsBoolean.False;
-                }
+                    if (r.IsPropertyReference)
+                    {
+                        if (r.IsSuperReference)
+                        {
+                            Throw.ReferenceError(engine.Realm, "Unsupported reference to 'super'");
+                        }
 
-                if (r.Strict)
+                        var o = TypeConverter.ToObject(engine.Realm, r.Base);
+
+                        r.EvaluateAndCachePropertyKey();
+                        var deleteStatus = o.Delete(r.ReferencedName);
+
+                        if (!deleteStatus)
+                        {
+                            if (r.Strict)
+                            {
+                                Throw.TypeError(engine.Realm, $"Cannot delete property '{r.ReferencedName}' of {o}");
+                            }
+
+                            if (StrictModeScope.IsStrictModeCode && !r.Base.AsObject().GetOwnProperty(r.ReferencedName).Configurable)
+                            {
+                                Throw.TypeError(engine.Realm, $"Cannot delete property '{r.ReferencedName}' of {o}");
+                            }
+                        }
+
+                        return deleteStatus ? JsBoolean.True : JsBoolean.False;
+                    }
+
+                    if (r.Strict)
+                    {
+                        Throw.SyntaxError(engine.Realm);
+                    }
+
+                    var bindings = (Environment) r.Base;
+                    return bindings.DeleteBinding(r.ReferencedName.ToString()) ? JsBoolean.True : JsBoolean.False;
+                }
+                finally
                 {
-                    Throw.SyntaxError(engine.Realm);
+                    engine._referencePool.Return(r);
                 }
-
-                var bindings = (Environment) r.Base;
-                engine._referencePool.Return(r);
-
-                return bindings.DeleteBinding(r.ReferencedName.ToString()) ? JsBoolean.True : JsBoolean.False;
 
             case Operator.Void:
                 _argument.GetValue(context);

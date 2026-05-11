@@ -1245,7 +1245,7 @@ internal sealed class JsDateTimeFormat : ObjectInstance
     {
         // Simple join - a more sophisticated implementation would use
         // locale-specific patterns
-        var result = new ValueStringBuilder();
+        using var result = new ValueStringBuilder();
         var hasDate = false;
         var hasTime = false;
 

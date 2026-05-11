@@ -138,23 +138,29 @@ public class JavaScriptException : JintException
         public override string ToString()
         {
             var sb = new ValueStringBuilder();
-
-            sb.Append("Error");
-            var message = Message;
-            if (!string.IsNullOrEmpty(message))
+            try
             {
-                sb.Append(": ");
-                sb.Append(message);
-            }
+                sb.Append("Error");
+                var message = Message;
+                if (!string.IsNullOrEmpty(message))
+                {
+                    sb.Append(": ");
+                    sb.Append(message);
+                }
 
-            var stackTrace = StackTrace;
-            if (stackTrace != null)
+                var stackTrace = StackTrace;
+                if (stackTrace != null)
+                {
+                    sb.Append(Environment.NewLine);
+                    sb.Append(stackTrace);
+                }
+
+                return sb.ToString();
+            }
+            finally
             {
-                sb.Append(Environment.NewLine);
-                sb.Append(stackTrace);
+                sb.Dispose();
             }
-
-            return sb.ToString();
         }
     }
 }

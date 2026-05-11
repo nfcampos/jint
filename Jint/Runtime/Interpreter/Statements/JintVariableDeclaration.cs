@@ -62,33 +62,38 @@ internal sealed class JintVariableDeclaration : JintStatement<VariableDeclaratio
             if (_statement.Kind != VariableDeclarationKind.Var && declaration.Left != null)
             {
                 var lhs = (Reference) declaration.Left.Evaluate(context);
-                var value = JsValue.Undefined;
-                if (declaration.Init != null)
+                try
                 {
-                    if (declaration.Init is JintClassExpression classExpr && declaration.Init._expression.IsAnonymousFunctionDefinition())
+                    var value = JsValue.Undefined;
+                    if (declaration.Init != null)
                     {
-                        value = classExpr.EvaluateWithName(context, lhs.ReferencedName.ToString()).Clone();
-                    }
-                    else
-                    {
-                        value = declaration.Init.GetValue(context).Clone();
+                        if (declaration.Init is JintClassExpression classExpr && declaration.Init._expression.IsAnonymousFunctionDefinition())
+                        {
+                            value = classExpr.EvaluateWithName(context, lhs.ReferencedName.ToString()).Clone();
+                        }
+                        else
+                        {
+                            value = declaration.Init.GetValue(context).Clone();
+                        }
+
+                        // Check for generator suspension after evaluating initializer
+                        if (context.IsSuspended())
+                        {
+                            return new Completion(CompletionType.Normal, value, _statement);
+                        }
+
+                        if (declaration.Init._expression.IsFunctionDefinition() && declaration.Init is not JintClassExpression)
+                        {
+                            ((Function) value).SetFunctionName(lhs.ReferencedName);
+                        }
                     }
 
-                    // Check for generator suspension after evaluating initializer
-                    if (context.IsSuspended())
-                    {
-                        engine._referencePool.Return(lhs);
-                        return new Completion(CompletionType.Normal, value, _statement);
-                    }
-
-                    if (declaration.Init._expression.IsFunctionDefinition() && declaration.Init is not JintClassExpression)
-                    {
-                        ((Function) value).SetFunctionName(lhs.ReferencedName);
-                    }
+                    lhs.InitializeReferencedBinding(value, _statement.Kind.GetDisposeHint());
                 }
-
-                lhs.InitializeReferencedBinding(value, _statement.Kind.GetDisposeHint());
-                engine._referencePool.Return(lhs);
+                finally
+                {
+                    engine._referencePool.Return(lhs);
+                }
             }
             else if (declaration.Init != null)
             {
@@ -128,32 +133,37 @@ internal sealed class JintVariableDeclaration : JintStatement<VariableDeclaratio
                 {
                     // slow path
                     var lhs = (Reference) declaration.Left!.Evaluate(context);
-                    lhs.AssertValid(engine.Realm);
-
-                    JsValue value;
-                    if (declaration.Init is JintClassExpression classExpr && declaration.Init._expression.IsAnonymousFunctionDefinition())
+                    try
                     {
-                        value = classExpr.EvaluateWithName(context, lhs.ReferencedName.ToString()).Clone();
-                    }
-                    else
-                    {
-                        value = declaration.Init.GetValue(context).Clone();
-                    }
+                        lhs.AssertValid(engine.Realm);
 
-                    // Check for generator suspension after evaluating initializer
-                    if (context.IsSuspended())
+                        JsValue value;
+                        if (declaration.Init is JintClassExpression classExpr && declaration.Init._expression.IsAnonymousFunctionDefinition())
+                        {
+                            value = classExpr.EvaluateWithName(context, lhs.ReferencedName.ToString()).Clone();
+                        }
+                        else
+                        {
+                            value = declaration.Init.GetValue(context).Clone();
+                        }
+
+                        // Check for generator suspension after evaluating initializer
+                        if (context.IsSuspended())
+                        {
+                            return new Completion(CompletionType.Normal, value, _statement);
+                        }
+
+                        if (declaration.Init._expression.IsFunctionDefinition() && declaration.Init is not JintClassExpression)
+                        {
+                            ((Function) value).SetFunctionName(lhs.ReferencedName);
+                        }
+
+                        engine.PutValue(lhs, value);
+                    }
+                    finally
                     {
                         engine._referencePool.Return(lhs);
-                        return new Completion(CompletionType.Normal, value, _statement);
                     }
-
-                    if (declaration.Init._expression.IsFunctionDefinition() && declaration.Init is not JintClassExpression)
-                    {
-                        ((Function) value).SetFunctionName(lhs.ReferencedName);
-                    }
-
-                    engine.PutValue(lhs, value);
-                    engine._referencePool.Return(lhs);
                 }
             }
         }

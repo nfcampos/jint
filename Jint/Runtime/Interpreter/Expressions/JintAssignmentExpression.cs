@@ -44,7 +44,8 @@ internal sealed class JintAssignmentExpression : JintExpression
         var engine = context.Engine;
         var strict = StrictModeScope.IsStrictModeCode;
 
-        JsValue originalLeftValue;
+        JsValue originalLeftValue = null!;
+        var originalLeftValueKnown = false;
         Reference lref;
         if (_leftIdentifier is not null && JintEnvironment.TryGetIdentifierEnvironmentWithBindingValue(
                 engine.ExecutionContext.LexicalEnvironment,
@@ -54,6 +55,7 @@ internal sealed class JintAssignmentExpression : JintExpression
                 out var temp))
         {
             originalLeftValue = temp;
+            originalLeftValueKnown = true;
             lref = engine._referencePool.Rent(identifierEnvironment, _leftIdentifier.Identifier.Value, strict, thisValue: null);
         }
         else
@@ -64,330 +66,322 @@ internal sealed class JintAssignmentExpression : JintExpression
             {
                 Throw.ReferenceError(context.Engine.Realm, "Invalid left-hand side in assignment");
             }
-            originalLeftValue = context.Engine.GetValue(lref, returnReferenceToPool: false);
         }
 
-        var handledByOverload = false;
-        JsValue? newLeftValue = null;
-
-        if (context.OperatorOverloadingAllowed)
+        try
         {
-            newLeftValue = EvaluateOperatorOverloading(context, originalLeftValue, newLeftValue, ref handledByOverload);
-        }
-
-        var wasMutatedInPlace = false;
-        if (!handledByOverload)
-        {
-            switch (_operator)
+            if (!originalLeftValueKnown)
             {
-                case Operator.AdditionAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
+                originalLeftValue = context.Engine.GetValue(lref, returnReferenceToPool: false);
+            }
 
-                        if (AreIntegerOperands(originalLeftValue, rval))
-                        {
-                            newLeftValue = (long) originalLeftValue.AsInteger() + rval.AsInteger();
-                        }
-                        else
-                        {
-                            var lprim = TypeConverter.ToPrimitive(originalLeftValue);
-                            var rprim = TypeConverter.ToPrimitive(rval);
+            var handledByOverload = false;
+            JsValue? newLeftValue = null;
 
-                            if (lprim.IsString() || rprim.IsString())
+            if (context.OperatorOverloadingAllowed)
+            {
+                newLeftValue = EvaluateOperatorOverloading(context, originalLeftValue, newLeftValue, ref handledByOverload);
+            }
+
+            var wasMutatedInPlace = false;
+            if (!handledByOverload)
+            {
+                switch (_operator)
+                {
+                    case Operator.AdditionAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
                             {
-                                wasMutatedInPlace = lprim is JsString.ConcatenatedString;
-                                if (lprim is not JsString jsString)
-                                {
-                                    jsString = new JsString.ConcatenatedString(TypeConverter.ToString(lprim));
-                                }
-
-                                newLeftValue = jsString.Append(rprim);
+                                return rval;
                             }
-                            else if (JintBinaryExpression.AreNonBigIntOperands(originalLeftValue, rval))
+
+                            if (AreIntegerOperands(originalLeftValue, rval))
                             {
-                                newLeftValue = TypeConverter.ToNumber(lprim) + TypeConverter.ToNumber(rprim);
+                                newLeftValue = (long) originalLeftValue.AsInteger() + rval.AsInteger();
                             }
                             else
                             {
-                                JintBinaryExpression.AssertValidBigIntArithmeticOperands(lprim, rprim);
-                                newLeftValue = JsBigInt.Create(TypeConverter.ToBigInt(lprim) + TypeConverter.ToBigInt(rprim));
+                                var lprim = TypeConverter.ToPrimitive(originalLeftValue);
+                                var rprim = TypeConverter.ToPrimitive(rval);
+
+                                if (lprim.IsString() || rprim.IsString())
+                                {
+                                    wasMutatedInPlace = lprim is JsString.ConcatenatedString;
+                                    if (lprim is not JsString jsString)
+                                    {
+                                        jsString = new JsString.ConcatenatedString(TypeConverter.ToString(lprim));
+                                    }
+
+                                    newLeftValue = jsString.Append(rprim);
+                                }
+                                else if (JintBinaryExpression.AreNonBigIntOperands(originalLeftValue, rval))
+                                {
+                                    newLeftValue = TypeConverter.ToNumber(lprim) + TypeConverter.ToNumber(rprim);
+                                }
+                                else
+                                {
+                                    JintBinaryExpression.AssertValidBigIntArithmeticOperands(lprim, rprim);
+                                    newLeftValue = JsBigInt.Create(TypeConverter.ToBigInt(lprim) + TypeConverter.ToBigInt(rprim));
+                                }
                             }
+
+                            break;
                         }
 
-                        break;
-                    }
-
-                case Operator.SubtractionAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
+                    case Operator.SubtractionAssignment:
                         {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        if (AreIntegerOperands(originalLeftValue, rval))
-                        {
-                            newLeftValue = JsNumber.Create(originalLeftValue.AsInteger() - rval.AsInteger());
-                        }
-                        else if (JintBinaryExpression.AreNonBigIntOperands(originalLeftValue, rval))
-                        {
-                            newLeftValue = JsNumber.Create(TypeConverter.ToNumber(originalLeftValue) - TypeConverter.ToNumber(rval));
-                        }
-                        else
-                        {
-                            JintBinaryExpression.AssertValidBigIntArithmeticOperands(originalLeftValue, rval);
-                            newLeftValue = JsBigInt.Create(TypeConverter.ToBigInt(originalLeftValue) - TypeConverter.ToBigInt(rval));
-                        }
-
-                        break;
-                    }
-
-                case Operator.MultiplicationAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        if (AreIntegerOperands(originalLeftValue, rval))
-                        {
-                            newLeftValue = (long) originalLeftValue.AsInteger() * rval.AsInteger();
-                        }
-                        else if (originalLeftValue.IsUndefined() || rval.IsUndefined())
-                        {
-                            newLeftValue = JsValue.Undefined;
-                        }
-                        else if (JintBinaryExpression.AreNonBigIntOperands(originalLeftValue, rval))
-                        {
-                            newLeftValue = TypeConverter.ToNumber(originalLeftValue) * TypeConverter.ToNumber(rval);
-                        }
-                        else
-                        {
-                            JintBinaryExpression.AssertValidBigIntArithmeticOperands(originalLeftValue, rval);
-                            newLeftValue = JsBigInt.Create(TypeConverter.ToBigInt(originalLeftValue) * TypeConverter.ToBigInt(rval));
-                        }
-
-                        break;
-                    }
-
-                case Operator.DivisionAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = Divide(context, originalLeftValue, rval);
-                        break;
-                    }
-
-                case Operator.RemainderAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = Remainder(context, originalLeftValue, rval);
-                        break;
-                    }
-
-                case Operator.BitwiseAndAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = TypeConverter.ToInt32(originalLeftValue) & TypeConverter.ToInt32(rval);
-                        break;
-                    }
-
-                case Operator.BitwiseOrAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = TypeConverter.ToInt32(originalLeftValue) | TypeConverter.ToInt32(rval);
-                        break;
-                    }
-
-                case Operator.BitwiseXorAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = TypeConverter.ToInt32(originalLeftValue) ^ TypeConverter.ToInt32(rval);
-                        break;
-                    }
-
-                case Operator.LeftShiftAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = TypeConverter.ToInt32(originalLeftValue) << (int) (TypeConverter.ToUint32(rval) & 0x1F);
-                        break;
-                    }
-
-                case Operator.RightShiftAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = TypeConverter.ToInt32(originalLeftValue) >> (int) (TypeConverter.ToUint32(rval) & 0x1F);
-                        break;
-                    }
-
-                case Operator.UnsignedRightShiftAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = (uint) TypeConverter.ToInt32(originalLeftValue) >> (int) (TypeConverter.ToUint32(rval) & 0x1F);
-                        break;
-                    }
-
-                case Operator.NullishCoalescingAssignment:
-                    {
-                        if (!originalLeftValue.IsNullOrUndefined())
-                        {
-                            engine._referencePool.Return(lref);
-                            return originalLeftValue;
-                        }
-
-                        var rval = NamedEvaluation(context, _right);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = rval;
-                        break;
-                    }
-
-                case Operator.LogicalAndAssignment:
-                    {
-                        if (!TypeConverter.ToBoolean(originalLeftValue))
-                        {
-                            engine._referencePool.Return(lref);
-                            return originalLeftValue;
-                        }
-
-                        var rval = NamedEvaluation(context, _right);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = rval;
-                        break;
-                    }
-
-                case Operator.LogicalOrAssignment:
-                    {
-                        if (TypeConverter.ToBoolean(originalLeftValue))
-                        {
-                            engine._referencePool.Return(lref);
-                            return originalLeftValue;
-                        }
-
-                        var rval = NamedEvaluation(context, _right);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        newLeftValue = rval;
-                        break;
-                    }
-
-                case Operator.ExponentiationAssignment:
-                    {
-                        var rval = _right.GetValue(context);
-                        if (context.IsSuspended())
-                        {
-                            engine._referencePool.Return(lref);
-                            return rval;
-                        }
-
-                        if (!originalLeftValue.IsBigInt() && !rval.IsBigInt())
-                        {
-                            newLeftValue = JsNumber.Create(Math.Pow(TypeConverter.ToNumber(originalLeftValue), TypeConverter.ToNumber(rval)));
-                        }
-                        else
-                        {
-                            var exponent = TypeConverter.ToBigInt(rval);
-                            if (exponent < 0)
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
                             {
-                                Throw.RangeError(context.Engine.Realm, "Exponent must be positive");
+                                return rval;
                             }
 
-                            if (exponent > int.MaxValue)
+                            if (AreIntegerOperands(originalLeftValue, rval))
                             {
-                                Throw.RangeError(context.Engine.Realm, "Maximum BigInt size exceeded");
+                                newLeftValue = JsNumber.Create(originalLeftValue.AsInteger() - rval.AsInteger());
+                            }
+                            else if (JintBinaryExpression.AreNonBigIntOperands(originalLeftValue, rval))
+                            {
+                                newLeftValue = JsNumber.Create(TypeConverter.ToNumber(originalLeftValue) - TypeConverter.ToNumber(rval));
+                            }
+                            else
+                            {
+                                JintBinaryExpression.AssertValidBigIntArithmeticOperands(originalLeftValue, rval);
+                                newLeftValue = JsBigInt.Create(TypeConverter.ToBigInt(originalLeftValue) - TypeConverter.ToBigInt(rval));
                             }
 
-                            var intExponent = (int) exponent;
-                            var baseValue = TypeConverter.ToBigInt(originalLeftValue);
-                            JintBinaryExpression.ValidateBigIntPowSize(context.Engine.Realm, baseValue, intExponent);
-                            newLeftValue = JsBigInt.Create(BigInteger.Pow(baseValue, intExponent));
+                            break;
                         }
 
-                        break;
-                    }
+                    case Operator.MultiplicationAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
 
-                default:
-                    Throw.NotImplementedException();
-                    return default;
+                            if (AreIntegerOperands(originalLeftValue, rval))
+                            {
+                                newLeftValue = (long) originalLeftValue.AsInteger() * rval.AsInteger();
+                            }
+                            else if (originalLeftValue.IsUndefined() || rval.IsUndefined())
+                            {
+                                newLeftValue = JsValue.Undefined;
+                            }
+                            else if (JintBinaryExpression.AreNonBigIntOperands(originalLeftValue, rval))
+                            {
+                                newLeftValue = TypeConverter.ToNumber(originalLeftValue) * TypeConverter.ToNumber(rval);
+                            }
+                            else
+                            {
+                                JintBinaryExpression.AssertValidBigIntArithmeticOperands(originalLeftValue, rval);
+                                newLeftValue = JsBigInt.Create(TypeConverter.ToBigInt(originalLeftValue) * TypeConverter.ToBigInt(rval));
+                            }
+
+                            break;
+                        }
+
+                    case Operator.DivisionAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = Divide(context, originalLeftValue, rval);
+                            break;
+                        }
+
+                    case Operator.RemainderAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = Remainder(context, originalLeftValue, rval);
+                            break;
+                        }
+
+                    case Operator.BitwiseAndAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = TypeConverter.ToInt32(originalLeftValue) & TypeConverter.ToInt32(rval);
+                            break;
+                        }
+
+                    case Operator.BitwiseOrAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = TypeConverter.ToInt32(originalLeftValue) | TypeConverter.ToInt32(rval);
+                            break;
+                        }
+
+                    case Operator.BitwiseXorAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = TypeConverter.ToInt32(originalLeftValue) ^ TypeConverter.ToInt32(rval);
+                            break;
+                        }
+
+                    case Operator.LeftShiftAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = TypeConverter.ToInt32(originalLeftValue) << (int) (TypeConverter.ToUint32(rval) & 0x1F);
+                            break;
+                        }
+
+                    case Operator.RightShiftAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = TypeConverter.ToInt32(originalLeftValue) >> (int) (TypeConverter.ToUint32(rval) & 0x1F);
+                            break;
+                        }
+
+                    case Operator.UnsignedRightShiftAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = (uint) TypeConverter.ToInt32(originalLeftValue) >> (int) (TypeConverter.ToUint32(rval) & 0x1F);
+                            break;
+                        }
+
+                    case Operator.NullishCoalescingAssignment:
+                        {
+                            if (!originalLeftValue.IsNullOrUndefined())
+                            {
+                                return originalLeftValue;
+                            }
+
+                            var rval = NamedEvaluation(context, _right);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = rval;
+                            break;
+                        }
+
+                    case Operator.LogicalAndAssignment:
+                        {
+                            if (!TypeConverter.ToBoolean(originalLeftValue))
+                            {
+                                return originalLeftValue;
+                            }
+
+                            var rval = NamedEvaluation(context, _right);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = rval;
+                            break;
+                        }
+
+                    case Operator.LogicalOrAssignment:
+                        {
+                            if (TypeConverter.ToBoolean(originalLeftValue))
+                            {
+                                return originalLeftValue;
+                            }
+
+                            var rval = NamedEvaluation(context, _right);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            newLeftValue = rval;
+                            break;
+                        }
+
+                    case Operator.ExponentiationAssignment:
+                        {
+                            var rval = _right.GetValue(context);
+                            if (context.IsSuspended())
+                            {
+                                return rval;
+                            }
+
+                            if (!originalLeftValue.IsBigInt() && !rval.IsBigInt())
+                            {
+                                newLeftValue = JsNumber.Create(Math.Pow(TypeConverter.ToNumber(originalLeftValue), TypeConverter.ToNumber(rval)));
+                            }
+                            else
+                            {
+                                var exponent = TypeConverter.ToBigInt(rval);
+                                if (exponent < 0)
+                                {
+                                    Throw.RangeError(context.Engine.Realm, "Exponent must be positive");
+                                }
+
+                                if (exponent > int.MaxValue)
+                                {
+                                    Throw.RangeError(context.Engine.Realm, "Maximum BigInt size exceeded");
+                                }
+
+                                var intExponent = (int) exponent;
+                                var baseValue = TypeConverter.ToBigInt(originalLeftValue);
+                                JintBinaryExpression.ValidateBigIntPowSize(context.Engine.Realm, baseValue, intExponent);
+                                newLeftValue = JsBigInt.Create(BigInteger.Pow(baseValue, intExponent));
+                            }
+
+                            break;
+                        }
+
+                    default:
+                        Throw.NotImplementedException();
+                        return default;
+                }
             }
-        }
 
-        // if we did string concatenation in-place, we don't need to update records, objects might have evil setters
-        if (!wasMutatedInPlace || lref.Base is not Environment)
+            // if we did string concatenation in-place, we don't need to update records, objects might have evil setters
+            if (!wasMutatedInPlace || lref.Base is not Environment)
+            {
+                engine.PutValue(lref, newLeftValue!);
+            }
+
+            return newLeftValue!;
+        }
+        finally
         {
-            engine.PutValue(lref, newLeftValue!);
+            engine._referencePool.Return(lref);
         }
-
-        engine._referencePool.Return(lref);
-        return newLeftValue!;
     }
 
     private JsValue? EvaluateOperatorOverloading(EvaluationContext context, JsValue originalLeftValue, JsValue? newLeftValue, ref bool handledByOverload)
@@ -526,22 +520,27 @@ internal sealed class JintAssignmentExpression : JintExpression
                 Throw.ReferenceError(engine.Realm, "Invalid left-hand side in assignment");
             }
 
-            lref.AssertValid(engine.Realm);
-
-            var rval = _right.GetValue(context);
-
-            // If generator suspended or return requested during right-hand side evaluation, don't assign
-            if (context.IsGeneratorAborted())
+            try
             {
-                engine._referencePool.Return(lref);
+                lref.AssertValid(engine.Realm);
+
+                var rval = _right.GetValue(context);
+
+                // If generator suspended or return requested during right-hand side evaluation, don't assign
+                if (context.IsGeneratorAborted())
+                {
+                    return rval;
+                }
+
+                // Set LastSyntaxElement for proper error location if PutValue throws
+                context.LastSyntaxElement = _left._expression;
+                engine.PutValue(lref, rval);
                 return rval;
             }
-
-            // Set LastSyntaxElement for proper error location if PutValue throws
-            context.LastSyntaxElement = _left._expression;
-            engine.PutValue(lref, rval);
-            engine._referencePool.Return(lref);
-            return rval;
+            finally
+            {
+                engine._referencePool.Return(lref);
+            }
         }
 
         internal static object? AssignToIdentifier(

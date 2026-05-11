@@ -622,6 +622,21 @@ public sealed partial class Engine : IDisposable
     /// </summary>
     internal JsValue GetValue(Reference reference, bool returnReferenceToPool)
     {
+        try
+        {
+            return GetValueCore(reference);
+        }
+        finally
+        {
+            if (returnReferenceToPool)
+            {
+                _referencePool.Return(reference);
+            }
+        }
+    }
+
+    private JsValue GetValueCore(Reference reference)
+    {
         var baseValue = reference.Base;
 
         if (reference.IsUnresolvableReference)
@@ -650,10 +665,6 @@ public sealed partial class Engine : IDisposable
         if (reference.IsPropertyReference)
         {
             var property = reference.ReferencedName;
-            if (returnReferenceToPool)
-            {
-                _referencePool.Return(reference);
-            }
 
             if (baseValue.IsNullOrUndefined())
             {
@@ -699,11 +710,6 @@ public sealed partial class Engine : IDisposable
 
         var record = (Environment) baseValue;
         var bindingValue = record.GetBindingValue(reference.ReferencedName.ToString(), reference.Strict);
-
-        if (returnReferenceToPool)
-        {
-            _referencePool.Return(reference);
-        }
 
         return bindingValue;
     }
@@ -982,9 +988,7 @@ public sealed partial class Engine : IDisposable
     public JsValue GetValue(JsValue scope, JsValue property)
     {
         var reference = _referencePool.Rent(scope, property, _isStrict, thisValue: null);
-        var jsValue = GetValue(reference, returnReferenceToPool: false);
-        _referencePool.Return(reference);
-        return jsValue;
+        return GetValue(reference, returnReferenceToPool: true);
     }
 
     /// <summary>

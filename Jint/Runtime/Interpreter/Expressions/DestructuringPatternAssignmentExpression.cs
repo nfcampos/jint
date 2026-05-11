@@ -209,39 +209,47 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
                 else if (left is MemberExpression me)
                 {
                     close = true;
-                    var reference = GetReferenceFromMember(context, me);
-
-                    // Check for generator suspension after evaluating member expression
-                    if (context.IsSuspended())
+                    Reference? reference = GetReferenceFromMember(context, me);
+                    try
                     {
-                        close = false; // Don't close iterator, we'll resume later
-                        return JsValue.Undefined;
-                    }
-
-                    // Check for generator return request
-                    if (suspendable?.ReturnRequested == true)
-                    {
-                        if (!done && iterator is not null)
+                        // Check for generator suspension after evaluating member expression
+                        if (context.IsSuspended())
                         {
-                            done = true;
-                            iterator.Close(CompletionType.Return);
+                            close = false; // Don't close iterator, we'll resume later
+                            return JsValue.Undefined;
                         }
-                        suspendable?.Data.Clear(pattern);
-                        close = false; // Already closed
-                        return JsValue.Undefined;
-                    }
 
-                    JsValue value;
-                    if (arrayOperations != null)
-                    {
-                        arrayOperations.TryGetValue(i, out value);
-                    }
-                    else
-                    {
-                        ConsumeFromIterator(iterator!, out value, out done);
-                    }
+                        // Check for generator return request
+                        if (suspendable?.ReturnRequested == true)
+                        {
+                            if (!done && iterator is not null)
+                            {
+                                done = true;
+                                iterator.Close(CompletionType.Return);
+                            }
+                            suspendable?.Data.Clear(pattern);
+                            close = false; // Already closed
+                            return JsValue.Undefined;
+                        }
 
-                    AssignToReference(engine, reference, value, environment);
+                        JsValue value;
+                        if (arrayOperations != null)
+                        {
+                            arrayOperations.TryGetValue(i, out value);
+                        }
+                        else
+                        {
+                            ConsumeFromIterator(iterator!, out value, out done);
+                        }
+
+                        var referenceToAssign = reference!;
+                        reference = null;
+                        AssignToReference(engine, referenceToAssign, value, environment);
+                    }
+                    finally
+                    {
+                        engine._referencePool.Return(reference);
+                    }
                 }
                 else if (left is DestructuringPattern dp)
                 {
@@ -269,73 +277,82 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
                 {
                     close = true;
                     Reference? reference = null;
-                    if (restElement.Argument is MemberExpression memberExpression)
+                    try
                     {
-                        reference = GetReferenceFromMember(context, memberExpression);
-
-                        // Check for generator suspension after evaluating member expression
-                        if (context.IsSuspended())
+                        if (restElement.Argument is MemberExpression memberExpression)
                         {
-                            close = false; // Don't close iterator, we'll resume later
-                            return JsValue.Undefined;
-                        }
+                            reference = GetReferenceFromMember(context, memberExpression);
 
-                        // Check for generator return request
-                        if (suspendable?.ReturnRequested == true)
-                        {
-                            if (!done && iterator is not null)
+                            // Check for generator suspension after evaluating member expression
+                            if (context.IsSuspended())
                             {
-                                done = true;
-                                iterator.Close(CompletionType.Return);
-                            }
-                            suspendable?.Data.Clear(pattern);
-                            close = false; // Already closed
-                            return JsValue.Undefined;
-                        }
-                    }
-
-                    JsArray array;
-                    if (arrayOperations != null)
-                    {
-                        var length = arrayOperations.GetLength();
-                        array = engine.Realm.Intrinsics.Array.ArrayCreate(length - i);
-                        for (uint j = i; j < length; ++j)
-                        {
-                            arrayOperations.TryGetValue(j, out var indexValue);
-                            array.SetIndexValue(j - i, indexValue, updateLength: false);
-                        }
-                    }
-                    else
-                    {
-                        array = engine.Realm.Intrinsics.Array.ArrayCreate(0);
-                        uint index = 0;
-                        done = true;
-                        do
-                        {
-                            if (!iterator!.TryIteratorStep(out var item))
-                            {
-                                done = true;
-                                break;
+                                close = false; // Don't close iterator, we'll resume later
+                                return JsValue.Undefined;
                             }
 
-                            var value = item.Get(CommonProperties.Value);
-                            array.SetIndexValue(index++, value, updateLength: false);
-                        } while (true);
+                            // Check for generator return request
+                            if (suspendable?.ReturnRequested == true)
+                            {
+                                if (!done && iterator is not null)
+                                {
+                                    done = true;
+                                    iterator.Close(CompletionType.Return);
+                                }
+                                suspendable?.Data.Clear(pattern);
+                                close = false; // Already closed
+                                return JsValue.Undefined;
+                            }
+                        }
 
-                        array.SetLength(index);
-                    }
+                        JsArray array;
+                        if (arrayOperations != null)
+                        {
+                            var length = arrayOperations.GetLength();
+                            array = engine.Realm.Intrinsics.Array.ArrayCreate(length - i);
+                            for (uint j = i; j < length; ++j)
+                            {
+                                arrayOperations.TryGetValue(j, out var indexValue);
+                                array.SetIndexValue(j - i, indexValue, updateLength: false);
+                            }
+                        }
+                        else
+                        {
+                            array = engine.Realm.Intrinsics.Array.ArrayCreate(0);
+                            uint index = 0;
+                            done = true;
+                            do
+                            {
+                                if (!iterator!.TryIteratorStep(out var item))
+                                {
+                                    done = true;
+                                    break;
+                                }
 
-                    if (restElement.Argument is Identifier leftIdentifier)
-                    {
-                        AssignToIdentifier(engine, leftIdentifier.Name, array, environment, checkReference);
+                                var value = item.Get(CommonProperties.Value);
+                                array.SetIndexValue(index++, value, updateLength: false);
+                            } while (true);
+
+                            array.SetLength(index);
+                        }
+
+                        if (restElement.Argument is Identifier leftIdentifier)
+                        {
+                            AssignToIdentifier(engine, leftIdentifier.Name, array, environment, checkReference);
+                        }
+                        else if (restElement.Argument is DestructuringPattern bp)
+                        {
+                            ProcessPatterns(context, bp, array, environment);
+                        }
+                        else
+                        {
+                            var referenceToAssign = reference!;
+                            reference = null;
+                            AssignToReference(engine, referenceToAssign, array, environment);
+                        }
                     }
-                    else if (restElement.Argument is DestructuringPattern bp)
+                    finally
                     {
-                        ProcessPatterns(context, bp, array, environment);
-                    }
-                    else
-                    {
-                        AssignToReference(engine, reference!, array, environment);
+                        engine._referencePool.Return(reference);
                     }
                 }
                 else if (left is AssignmentPattern assignmentPattern)
@@ -347,84 +364,93 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
                     // 4. Then PutValue(lref, v)
 
                     Reference? memberReference = null;
-                    if (assignmentPattern.Left is MemberExpression memberExpr)
+                    try
                     {
-                        close = true;
-                        memberReference = GetReferenceFromMember(context, memberExpr);
-
-                        // Check for generator suspension after evaluating member expression
-                        if (context.IsSuspended())
+                        if (assignmentPattern.Left is MemberExpression memberExpr)
                         {
-                            close = false;
-                            return JsValue.Undefined;
-                        }
+                            close = true;
+                            memberReference = GetReferenceFromMember(context, memberExpr);
 
-                        // Check for generator return request
-                        if (suspendable?.ReturnRequested == true)
-                        {
-                            if (!done && iterator is not null)
+                            // Check for generator suspension after evaluating member expression
+                            if (context.IsSuspended())
                             {
-                                done = true;
-                                iterator.Close(CompletionType.Return);
+                                close = false;
+                                return JsValue.Undefined;
                             }
-                            suspendable?.Data.Clear(pattern);
-                            close = false;
-                            return JsValue.Undefined;
-                        }
-                    }
 
-                    JsValue value;
-                    if (arrayOperations != null)
-                    {
-                        arrayOperations.TryGetValue(i, out value);
-                    }
-                    else
-                    {
-                        ConsumeFromIterator(iterator!, out value, out done);
-                    }
-
-                    if (value.IsUndefined())
-                    {
-                        var jintExpression = Build(assignmentPattern.Right);
-                        value = jintExpression.GetValue(context);
-
-                        // Check for generator suspension after evaluating default value
-                        if (context.IsSuspended())
-                        {
-                            close = false; // Don't close iterator, we'll resume later
-                            return JsValue.Undefined;
-                        }
-
-                        // Check for generator return request after evaluating default value
-                        if (suspendable?.ReturnRequested == true)
-                        {
-                            if (!done && iterator is not null)
+                            // Check for generator return request
+                            if (suspendable?.ReturnRequested == true)
                             {
-                                done = true;
-                                iterator.Close(CompletionType.Return);
+                                if (!done && iterator is not null)
+                                {
+                                    done = true;
+                                    iterator.Close(CompletionType.Return);
+                                }
+                                suspendable?.Data.Clear(pattern);
+                                close = false;
+                                return JsValue.Undefined;
                             }
-                            suspendable?.Data.Clear(pattern);
-                            close = false; // Already closed
-                            return JsValue.Undefined;
                         }
-                    }
 
-                    if (memberReference is not null)
-                    {
-                        AssignToReference(engine, memberReference, value, environment);
-                    }
-                    else if (assignmentPattern.Left is Identifier leftIdentifier)
-                    {
-                        if (assignmentPattern.Right.IsFunctionDefinition())
+                        JsValue value;
+                        if (arrayOperations != null)
                         {
-                            ((Function) value).SetFunctionName(new JsString(leftIdentifier.Name));
+                            arrayOperations.TryGetValue(i, out value);
+                        }
+                        else
+                        {
+                            ConsumeFromIterator(iterator!, out value, out done);
                         }
 
-                        AssignToIdentifier(engine, leftIdentifier.Name, value, environment, checkReference);
+                        if (value.IsUndefined())
+                        {
+                            var jintExpression = Build(assignmentPattern.Right);
+                            value = jintExpression.GetValue(context);
+
+                            // Check for generator suspension after evaluating default value
+                            if (context.IsSuspended())
+                            {
+                                close = false; // Don't close iterator, we'll resume later
+                                return JsValue.Undefined;
+                            }
+
+                            // Check for generator return request after evaluating default value
+                            if (suspendable?.ReturnRequested == true)
+                            {
+                                if (!done && iterator is not null)
+                                {
+                                    done = true;
+                                    iterator.Close(CompletionType.Return);
+                                }
+                                suspendable?.Data.Clear(pattern);
+                                close = false; // Already closed
+                                return JsValue.Undefined;
+                            }
+                        }
+
+                        if (memberReference is not null)
+                        {
+                            var referenceToAssign = memberReference!;
+                            memberReference = null;
+                            AssignToReference(engine, referenceToAssign, value, environment);
+                        }
+                        else if (assignmentPattern.Left is Identifier leftIdentifier)
+                        {
+                            if (assignmentPattern.Right.IsFunctionDefinition())
+                            {
+                                ((Function) value).SetFunctionName(new JsString(leftIdentifier.Name));
+                            }
+
+                            AssignToIdentifier(engine, leftIdentifier.Name, value, environment, checkReference);
+                        }
+                        else if (assignmentPattern.Left is DestructuringPattern bp)
+                        {
+                            ProcessPatterns(context, bp, value, environment);
+                        }
                     }
-                    else if (assignmentPattern.Left is DestructuringPattern bp)
+                    finally
                     {
-                        ProcessPatterns(context, bp, value, environment);
+                        engine._referencePool.Return(memberReference);
                     }
                 }
                 else
@@ -520,73 +546,82 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
                     // For binding patterns (environment != null), ResolveBinding before GetV (spec 14.3.3.3 step 2-3)
                     Reference? memberReference = null;
                     Reference? bindingRef = null;
-                    if (assignmentPattern.Left is MemberExpression memberExpr)
+                    try
                     {
-                        memberReference = GetReferenceFromMember(context, memberExpr);
-                        if (context.IsSuspended())
+                        if (assignmentPattern.Left is MemberExpression memberExpr)
                         {
-                            return JsValue.Undefined;
-                        }
-                    }
-                    else if (assignmentPattern.Left is Identifier leftId)
-                    {
-                        var target = leftId ?? identifier;
-                        bindingRef = context.Engine.ResolveBinding(target!.Name, environment);
-                    }
-
-                    var value = source.Get(sourceKey);
-                    if (value.IsUndefined())
-                    {
-                        var jintExpression = Build(assignmentPattern.Right);
-                        var completion = jintExpression.GetValue(context);
-                        if (context.IsAbrupt())
-                        {
-                            return completion;
-                        }
-                        // Check for async/generator suspension after evaluating default value
-                        if (context.IsSuspended())
-                        {
-                            return JsValue.Undefined;
-                        }
-                        value = completion;
-                    }
-
-                    if (memberReference is not null)
-                    {
-                        AssignToReference(context.Engine, memberReference, value, environment);
-                    }
-                    else if (assignmentPattern.Left is DestructuringPattern bp)
-                    {
-                        ProcessPatterns(context, bp, value, environment);
-                    }
-                    else
-                    {
-                        var target = assignmentPattern.Left as Identifier ?? identifier;
-
-                        if (assignmentPattern.Right.IsFunctionDefinition())
-                        {
-                            ((Function) value).SetFunctionName(target!.Name);
-                        }
-
-                        if (bindingRef is not null)
-                        {
-                            if (environment is not null)
+                            memberReference = GetReferenceFromMember(context, memberExpr);
+                            if (context.IsSuspended())
                             {
-                                bindingRef.InitializeReferencedBinding(value, DisposeHint.Normal);
+                                return JsValue.Undefined;
                             }
-                            else
+                        }
+                        else if (assignmentPattern.Left is Identifier leftId)
+                        {
+                            var target = leftId ?? identifier;
+                            bindingRef = context.Engine.ResolveBinding(target!.Name, environment);
+                        }
+
+                        var value = source.Get(sourceKey);
+                        if (value.IsUndefined())
+                        {
+                            var jintExpression = Build(assignmentPattern.Right);
+                            var completion = jintExpression.GetValue(context);
+                            if (context.IsAbrupt())
                             {
-                                if (checkReference && bindingRef.IsUnresolvableReference && StrictModeScope.IsStrictModeCode)
-                                {
-                                    Throw.ReferenceError(context.Engine.Realm, bindingRef);
-                                }
-                                context.Engine.PutValue(bindingRef, value);
+                                return completion;
                             }
+                            // Check for async/generator suspension after evaluating default value
+                            if (context.IsSuspended())
+                            {
+                                return JsValue.Undefined;
+                            }
+                            value = completion;
+                        }
+
+                        if (memberReference is not null)
+                        {
+                            var referenceToAssign = memberReference!;
+                            memberReference = null;
+                            AssignToReference(context.Engine, referenceToAssign, value, environment);
+                        }
+                        else if (assignmentPattern.Left is DestructuringPattern bp)
+                        {
+                            ProcessPatterns(context, bp, value, environment);
                         }
                         else
                         {
-                            AssignToIdentifier(context.Engine, target!.Name, value, environment, checkReference);
+                            var target = assignmentPattern.Left as Identifier ?? identifier;
+
+                            if (assignmentPattern.Right.IsFunctionDefinition())
+                            {
+                                ((Function) value).SetFunctionName(target!.Name);
+                            }
+
+                            if (bindingRef is not null)
+                            {
+                                if (environment is not null)
+                                {
+                                    bindingRef.InitializeReferencedBinding(value, DisposeHint.Normal);
+                                }
+                                else
+                                {
+                                    if (checkReference && bindingRef.IsUnresolvableReference && StrictModeScope.IsStrictModeCode)
+                                    {
+                                        Throw.ReferenceError(context.Engine.Realm, bindingRef);
+                                    }
+                                    context.Engine.PutValue(bindingRef, value);
+                                }
+                            }
+                            else
+                            {
+                                AssignToIdentifier(context.Engine, target!.Name, value, environment, checkReference);
+                            }
                         }
+                    }
+                    finally
+                    {
+                        context.Engine._referencePool.Return(memberReference);
                     }
                 }
                 else if (p.Value is DestructuringPattern dp)
@@ -596,9 +631,18 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
                 }
                 else if (p.Value is MemberExpression memberExpression)
                 {
-                    var reference = GetReferenceFromMember(context, memberExpression);
-                    var value = source.Get(sourceKey);
-                    AssignToReference(context.Engine, reference, value, environment);
+                    Reference? reference = GetReferenceFromMember(context, memberExpression);
+                    try
+                    {
+                        var value = source.Get(sourceKey);
+                        var referenceToAssign = reference!;
+                        reference = null;
+                        AssignToReference(context.Engine, referenceToAssign, value, environment);
+                    }
+                    finally
+                    {
+                        context.Engine._referencePool.Return(reference);
+                    }
                 }
                 else
                 {
@@ -639,10 +683,19 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
                 }
                 else if (restElement.Argument is MemberExpression memberExpression)
                 {
-                    var left = GetReferenceFromMember(context, memberExpression);
-                    var rest = context.Engine.Realm.Intrinsics.Object.Construct(0);
-                    source.CopyDataProperties(rest, processedProperties);
-                    AssignToReference(context.Engine, left, rest, environment);
+                    Reference? left = GetReferenceFromMember(context, memberExpression);
+                    try
+                    {
+                        var rest = context.Engine.Realm.Intrinsics.Object.Construct(0);
+                        source.CopyDataProperties(rest, processedProperties);
+                        var referenceToAssign = left!;
+                        left = null;
+                        AssignToReference(context.Engine, referenceToAssign, rest, environment);
+                    }
+                    finally
+                    {
+                        context.Engine._referencePool.Return(left);
+                    }
                 }
                 else
                 {
@@ -660,15 +713,21 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
         JsValue v,
         Environment? environment)
     {
-        if (environment is null)
+        try
         {
-            engine.PutValue(lhs, v);
+            if (environment is null)
+            {
+                engine.PutValue(lhs, v);
+            }
+            else
+            {
+                lhs.InitializeReferencedBinding(v, DisposeHint.Normal);
+            }
         }
-        else
+        finally
         {
-            lhs.InitializeReferencedBinding(v, DisposeHint.Normal);
+            engine._referencePool.Return(lhs);
         }
-        engine._referencePool.Return(lhs);
     }
 
     private static Reference GetReferenceFromMember(EvaluationContext context, MemberExpression memberExpression)
@@ -679,7 +738,15 @@ internal sealed class DestructuringPatternAssignmentExpression : JintExpression
         {
             Throw.ReferenceError(context.Engine.Realm, "invalid reference");
         }
-        reference.AssertValid(context.Engine.Realm);
+        try
+        {
+            reference.AssertValid(context.Engine.Realm);
+        }
+        catch
+        {
+            context.Engine._referencePool.Return(reference);
+            throw;
+        }
         return reference;
     }
 

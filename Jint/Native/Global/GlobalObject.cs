@@ -299,7 +299,7 @@ public sealed partial class GlobalObject : ObjectInstance
     private JsValue Encode(string uri, SearchValues<char> allowedCharacters)
     {
         var strLen = uri.Length;
-        var builder = new ValueStringBuilder(uri.Length);
+        using var builder = new ValueStringBuilder(uri.Length);
         Span<byte> buffer = stackalloc byte[4];
 
         for (var k = 0; k < strLen; k++)
@@ -386,7 +386,6 @@ public sealed partial class GlobalObject : ObjectInstance
         return builder.ToString();
 
 uriError:
-        builder.Dispose();
         _engine.SignalError(UriError);
         return JsEmpty.Instance;
     }
@@ -623,7 +622,7 @@ uriError:
     [JsFunction]
     private static JsValue Escape(JsValue thisObject, [ToString] string uri)
     {
-        var builder = new ValueStringBuilder(uri.Length);
+        using var builder = new ValueStringBuilder(uri.Length);
 
         foreach (var c in uri)
         {

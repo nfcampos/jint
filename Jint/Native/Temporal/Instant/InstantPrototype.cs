@@ -697,57 +697,64 @@ internal sealed partial class InstantPrototype : Prototype
 
         // Format the date-time
         var sb = new ValueStringBuilder();
-        FormatIsoYear(ref sb, dateTime.Year);
-        sb.Append('-');
-        sb.Append(dateTime.Month.ToString("D2", CultureInfo.InvariantCulture));
-        sb.Append('-');
-        sb.Append(dateTime.Day.ToString("D2", CultureInfo.InvariantCulture));
-        sb.Append('T');
-        sb.Append(dateTime.Hour.ToString("D2", CultureInfo.InvariantCulture));
-        sb.Append(':');
-        sb.Append(dateTime.Minute.ToString("D2", CultureInfo.InvariantCulture));
-
-        // For minute precision, don't include seconds
-        if (fractionalSecondDigits != -2)
+        try
         {
+            FormatIsoYear(ref sb, dateTime.Year);
+            sb.Append('-');
+            sb.Append(dateTime.Month.ToString("D2", CultureInfo.InvariantCulture));
+            sb.Append('-');
+            sb.Append(dateTime.Day.ToString("D2", CultureInfo.InvariantCulture));
+            sb.Append('T');
+            sb.Append(dateTime.Hour.ToString("D2", CultureInfo.InvariantCulture));
             sb.Append(':');
-            sb.Append(dateTime.Second.ToString("D2", CultureInfo.InvariantCulture));
+            sb.Append(dateTime.Minute.ToString("D2", CultureInfo.InvariantCulture));
 
-            // Format fractional seconds
-            var subSecondNs = (long) dateTime.Millisecond * 1_000_000 +
-                              (long) dateTime.Microsecond * 1_000 +
-                              dateTime.Nanosecond;
-
-            if (fractionalSecondDigits == -1)
+            // For minute precision, don't include seconds
+            if (fractionalSecondDigits != -2)
             {
-                // Auto: show minimum needed
-                if (subSecondNs != 0)
+                sb.Append(':');
+                sb.Append(dateTime.Second.ToString("D2", CultureInfo.InvariantCulture));
+
+                // Format fractional seconds
+                var subSecondNs = (long) dateTime.Millisecond * 1_000_000 +
+                                  (long) dateTime.Microsecond * 1_000 +
+                                  dateTime.Nanosecond;
+
+                if (fractionalSecondDigits == -1)
                 {
-                    var fraction = subSecondNs.ToString("D9", CultureInfo.InvariantCulture).TrimEnd('0');
+                    // Auto: show minimum needed
+                    if (subSecondNs != 0)
+                    {
+                        var fraction = subSecondNs.ToString("D9", CultureInfo.InvariantCulture).TrimEnd('0');
+                        sb.Append('.');
+                        sb.Append(fraction);
+                    }
+                }
+                else if (fractionalSecondDigits > 0)
+                {
+                    var fraction = subSecondNs.ToString("D9", CultureInfo.InvariantCulture);
                     sb.Append('.');
-                    sb.Append(fraction);
+                    sb.Append(fraction.AsSpan(0, fractionalSecondDigits));
                 }
             }
-            else if (fractionalSecondDigits > 0)
+
+            // Format offset
+            // Use Z only when timeZone was not explicitly set and offset is 0
+            if (!timeZoneExplicitlySet && offsetNs == 0)
             {
-                var fraction = subSecondNs.ToString("D9", CultureInfo.InvariantCulture);
-                sb.Append('.');
-                sb.Append(fraction.AsSpan(0, fractionalSecondDigits));
+                sb.Append('Z');
             }
-        }
+            else
+            {
+                FormatOffset(ref sb, offsetNs);
+            }
 
-        // Format offset
-        // Use Z only when timeZone was not explicitly set and offset is 0
-        if (!timeZoneExplicitlySet && offsetNs == 0)
-        {
-            sb.Append('Z');
+            return sb.ToString();
         }
-        else
+        finally
         {
-            FormatOffset(ref sb, offsetNs);
+            sb.Dispose();
         }
-
-        return sb.ToString();
     }
 
     /// <summary>
@@ -768,10 +775,9 @@ internal sealed partial class InstantPrototype : Prototype
 
     private static void FormatOffset(ref ValueStringBuilder sb, long offsetNs)
     {
-        // Use FormatDateTimeUTCOffsetRounded: round to nearest minute, format as ±HH:MM
+        // Use FormatDateTimeUTCOffsetRounded: round to nearest minute, format as +/-HH:MM
         sb.Append(TemporalHelpers.FormatOffsetRounded(offsetNs));
     }
-
 
     /// <summary>
     /// https://tc39.es/proposal-temporal/#sec-temporal.instant.prototype.tojson

@@ -107,7 +107,7 @@ internal sealed partial class BigIntPrototype : Prototype
 
         const string Digits = "0123456789abcdefghijklmnopqrstuvwxyz";
 
-        var sb = new ValueStringBuilder(stackalloc char[64]);
+        using var sb = new ValueStringBuilder(stackalloc char[64]);
 
         for (; value > 0; value /= radixMV)
         {
